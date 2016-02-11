@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import scipy.spatial.distance as dist
 import os
 import pickle
+import operator
 
 #python 2
 
@@ -200,18 +201,29 @@ class BirchNode:
 
     def __init__(self, birch, is_leaf = False):
         self.birch = birch
-        self.clustering_features = []
+        self._clustering_features = []
         self.is_leaf = is_leaf
         self.cf_parent = None
 
     @property
     def size(self):
-        return len(self.clustering_features)
+        return len(self._clustering_features)
 
 
     @property
     def has_to_split(self):
-        return len(self.clustering_features) > self.birch.branching_factor
+        return len(self._clustering_features) > self.birch.branching_factor
+    
+    @property
+    def cf_sum(self):
+        n_data_sum = 0
+        linear_sum_sum = 0
+        squared_norm_sum = 0
+        for cf in self._clustering_features:
+            n_data_sum += cf.n_data
+            linear_sum_sum += cf.linear_sum
+            squared_norm_sum += cf.squared_norm
+        return n_data_sum, linear_sum_sum, squared_norm_sum
 
     @property
     def is_root(self):
@@ -226,58 +238,94 @@ class BirchNode:
 
     def add(self, index, data_point_cf):
         data_point, squared_norm = data_point_cf
-        if len(self.clustering_features) == 0:
-            new_cf = LeafClusteringFeature(self.birch, self)
-            self.clustering_features.append(new_cf)
+        if len(self._clustering_features) == 0:
+            new_cf = LeafClusteringFeature(self.birch)
+            self.add_clustering_feature(new_cf)
             new_cf.add(index, data_point_cf)
         else:
             distances = []
-            for cf in self.clustering_features:
+            for cf in self._clustering_features:
                 distance = cf.distance(1, data_point, squared_norm)
                 distances.append(distance)
-            best_cf = self.clustering_features[np.argmin(distances)]
+            best_cf = self._clustering_features[np.argmin(distances)]
             can_be_added = best_cf.can_add(index, data_point_cf)
             if can_be_added:
                 best_cf.add(index, data_point_cf)
             else:
-                new_cf = LeafClusteringFeature(self.birch, self)
+                new_cf = LeafClusteringFeature(self.birch)
+                self.add_clustering_feature(new_cf)
                 new_cf.add(index, data_point_cf)
-                self.clustering_features.append(new_cf)
                 if self.has_to_split:
                     self.split()
+
+    def add_clustering_feature(self, cf):
+        self._clustering_features.append(cf)
+        cf.node = self
+        if not self.is_root and not cf.is_empty:
+            self.cf_parent.update(cf.n_data, cf.linear_sum, cf.squared_norm)
+
 
     #returns tuple with center and indices of leaf clusters
     def get_clusters(self):
         clusters = []
         if self.is_leaf:
-            for cf in self.clustering_features:
+            for cf in self._clustering_features:
                 clusters.append((cf.centroid, cf.get_indices()))
         else:
-            for cf in self.clustering_features:
+            for cf in self._clustering_features:
                 clusters += cf.get_clusters()
         return clusters
 
-    def replace_cfs(self, old_cf, new_cf1, new_cf2):
-        self.clustering_features.remove(old_cf)
-        self.clustering_features.append(new_cf1)
-        self.clustering_features.append(new_cf2)
+    #only use on splits
+    def replace_cf(self, old_cf, cf1, cf2):
+        self._clustering_features.remove(old_cf)
+        self._clustering_features.append(cf1)
+        self._clustering_features.append(cf2)
 
+    #TODO
+    def merging_refinement(self):
+        pass
 
     def split(self):
-        node1 = BirchNode(self.birch, self.is_leaf)
-        node2 = BirchNode(self.birch, self.is_leaf)
-        node1.clustering_features = self.clustering_features[:-1]
-        node2.clustering_features = [self.clustering_features[-1]]
+        new_node0 = BirchNode(self.birch, self.is_leaf)
+        new_node1 = BirchNode(self.birch, self.is_leaf)
+        new_cf0 = NonLeafClusteringFeature(self.birch, new_node0)
+        new_cf1 = NonLeafClusteringFeature(self.birch, new_node1)
+
+        cfs = self._clustering_features
+        distances = {}
+        i = 0
+        for cf1 in cfs:
+            j = i + 1
+            for cf2 in cfs[j:]:
+                distances[(i, j)] = self.birch.cluster_distance(cf1.n_data, cf1.linear_sum, cf1.squared_norm, cf2.n_data, cf2.linear_sum, cf2.squared_norm)
+                j += 1
+            i += 1
+        seeds_indices = max(distances.iteritems(), key=operator.itemgetter(1))[0]
+        seed0 = cfs[seeds_indices[0]]
+        seed1 = cfs[seeds_indices[1]]
+        new_node0.add_clustering_feature(seed0)
+        new_node1.add_clustering_feature(seed1)
+
+
+        cfs.remove(seed0)
+        cfs.remove(seed1)
+        new_nodes = [new_node0, new_node1]
+        while len(cfs) != 0:
+            next_cf = cfs[0]
+            dist0 = self.birch.cluster_distance(new_cf0.n_data, new_cf0.linear_sum, new_cf0.squared_norm, next_cf.n_data, next_cf.linear_sum, next_cf.squared_norm)
+            dist1 = self.birch.cluster_distance(new_cf1.n_data, new_cf1.linear_sum, new_cf1.squared_norm, next_cf.n_data, next_cf.linear_sum, next_cf.squared_norm)
+            closest_node = new_nodes[np.argmin([dist0, dist1])]
+            closest_node.add_clustering_feature(next_cf)
+            cfs.remove(next_cf)
+
         if self.is_root:
             new_root = BirchNode(self.birch, False)
-            cf1 = NonLeafClusteringFeature(self.birch, new_root, node1)
-            cf2 = NonLeafClusteringFeature(self.birch, new_root, node2)
-            new_root.clustering_features = [cf1, cf2]
+            new_root.add_clustering_feature(new_cf0)
+            new_root.add_clustering_feature(new_cf1)
             self.birch.root = new_root
         else:
-            cf1 = NonLeafClusteringFeature(self.birch, self.node_parent, node1)
-            cf2 = NonLeafClusteringFeature(self.birch, self.node_parent, node2)
-            self.node_parent.replace_cfs(self.cf_parent, cf1, cf2)
+            self.node_parent.replace_cf(self.cf_parent, new_cf0, new_cf1)
             if self.node_parent.has_to_split:
                 self.node_parent.split()
 
@@ -286,21 +334,27 @@ class ClusteringFeature:
 
     __metaclass__ = ABCMeta
 
-    def __init__(self, birch, node, n_data, linear_sum, squared_norm):
+    def __init__(self, birch, n_data, linear_sum, squared_norm):
         self.birch = birch
-        self.node = node
         self.linear_sum = linear_sum
         self.squared_norm = squared_norm
         self.n_data = n_data
+        self.node = None
 
     @property
     def cf_parent(self):
+        if self.node is None:
+            return None
         return self.node.cf_parent
 
+    @property
+    def is_empty(self):
+        return self.n_data == 0
 
     @property
     def centroid(self):
         return self.linear_sum / self.n_data
+
 
     def update(self, n_data_increment, linear_sum_increment, squared_norm_increment):
         self.linear_sum += linear_sum_increment
@@ -323,9 +377,9 @@ class ClusteringFeature:
 
 class LeafClusteringFeature(ClusteringFeature):
 
-    def __init__(self, birch, node):
+    def __init__(self, birch):
         self.data_indices = []
-        super(LeafClusteringFeature, self).__init__(birch, node, 0, 0, 0)
+        super(LeafClusteringFeature, self).__init__(birch, 0, 0, 0)
 
     def can_add(self, index, data_point_cf):
         data_point, squared_norm = data_point_cf
@@ -336,12 +390,10 @@ class LeafClusteringFeature(ClusteringFeature):
             return True
         return False
 
-
     def add(self, index, data_point_cf):
         data_point, squared_norm = data_point_cf
         self.update(1, data_point, squared_norm)
         self.data_indices.append(index)
-
 
     def get_indices(self):
         return self.data_indices
@@ -349,17 +401,18 @@ class LeafClusteringFeature(ClusteringFeature):
 
 class NonLeafClusteringFeature(ClusteringFeature):
 
-    def __init__(self, birch, node, child_node):
+    def __init__(self, birch, child_node):
         n_data = 0
         linear_sum = 0
         squared_norm = 0
-        for cf in child_node.clustering_features:
-            n_data += cf.n_data
-            linear_sum += cf.linear_sum
-            squared_norm += cf.squared_norm
-        super(NonLeafClusteringFeature, self).__init__(birch, node, n_data, linear_sum, squared_norm)
+        super(NonLeafClusteringFeature, self).__init__(birch, n_data, linear_sum, squared_norm)
+        self.set_child(child_node)
+
+    def set_child(self, child_node):
         self.child = child_node
         child_node.cf_parent = self
+        self.n_data, self.linear_sum, self.squared_norm = child_node.cf_sum
+
 
     def can_add(self, index, data_point):
         return True
