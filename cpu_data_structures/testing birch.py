@@ -5,32 +5,31 @@ import pandas as pd
 from LucasBirch import Birch
 
 
-# mean1 = [10, 10]
-# mean2 = [20, 20]
-# mean3 = [30, 30]
-# mean4 = [40, 40]
-# mean5 = [50, 50]
-# cov1 = [[2.5, 0], [0, 2.5]]
-# cov2 = [[1, 0], [0, 1]]
-# X1= np.random.multivariate_normal(mean1, cov1, 9)
-# X2= np.random.multivariate_normal(mean2, cov1, 1)
-# #X3= np.random.multivariate_normal(mean2, cov1, 1)
-# # X4 = np.random.multivariate_normal(mean4, cov2, n)
-# # X5 = np.random.multivariate_normal(mean5, cov2, n)
-# X = np.vstack((X1, X2))
+mean1 = [10, 10]
+mean2 = [20, 20]
+mean3 = [30, 30]
+mean4 = [40, 40]
+mean5 = [50, 50]
+cov1 = [[2.5, 0], [0, 2.5]]
+cov2 = [[1, 0], [0, 1]]
+n = 10
+X1= np.random.multivariate_normal(mean1, cov1, n)
+X2= np.random.multivariate_normal(mean2, cov1, n)
+X3= np.random.multivariate_normal(mean3, cov1, n)
+X4 = np.random.multivariate_normal(mean4, cov2, n)
+X5 = np.random.multivariate_normal(mean5, cov2, n)
+X = np.vstack((X1, X2, X3, X4, X5))
 # np.save('test_array', X)
 
-n = 8
 
-X = np.load('test_array.npy')
-X = X[:n]
+#X = np.load('test_array.npy')
 print(X.shape)
 df = pd.DataFrame(X)
-df = df.iloc[:n]
 
-threshold = 0.1
+threshold = 3
 brc = Birch(threshold, 'd1', 'r', 2)
 brc.add_pandas_data_frame(df)
+X = X
 #brc.add_pandas_data_frame(df3)
 # brc.add_pandas_data_frame(df4)
 # brc.add_pandas_data_frame(df5)
