@@ -12,6 +12,9 @@ import operator
 
 #python 2
 
+#TODO ERASE THIS
+number = 0
+
 class Birch:
 
     def __init__(self, threshold, cluster_distance_measure='d0', cluster_size_measure='r', branching_factor=50, data_in_memory=True):
@@ -204,6 +207,9 @@ class BirchNode:
         self._clustering_features = []
         self.is_leaf = is_leaf
         self.cf_parent = None
+        global number
+        self.number = number
+        number += 1
 
     @property
     def size(self):
@@ -281,6 +287,8 @@ class BirchNode:
         self._clustering_features.remove(old_cf)
         self._clustering_features.append(cf1)
         self._clustering_features.append(cf2)
+        cf1.node = self
+        cf2.node = self
 
     #TODO
     def merging_refinement(self):
@@ -340,6 +348,10 @@ class ClusteringFeature:
         self.squared_norm = squared_norm
         self.n_data = n_data
         self.node = None
+        global number
+        self.number = number
+        number += 1
+
 
     @property
     def cf_parent(self):
