@@ -17,19 +17,25 @@ number = 0
 
 class Birch:
 
-    def __init__(self, threshold, cluster_distance_measure='d0', cluster_size_measure='r', branching_factor=50, data_in_memory=True):
+    def __init__(self, threshold, cluster_distance_measure='d0', cluster_size_measure='r', global_cluster_number=50, branching_factor=50, data_in_memory=True):
         self.branching_factor = branching_factor
         self.threshold = threshold
         self.cluster_size_measure = cluster_size_measure
         self.cluster_distance_measure = cluster_distance_measure
         self.root = BirchNode(self, True)
         self._labels = None
+        self._global_labels = None
         self.data_in_memory = data_in_memory
         self.data = None
+        self.agglomeration = 50
 
     @property
     def has_labels(self):
         return self._labels is not None
+
+    @property
+    def has_global_labels(self):
+        return self._global_labels is not None
 
     @property
     def n_data(self):
@@ -43,6 +49,18 @@ class Birch:
 
     @property
     def centers(self):
+        if not self.has_labels:
+            self.calculate_labels()
+        return self._centers
+
+    @property
+    def global_labels(self):
+        if not self.has_labels:
+            self.calculate_global_labels()
+        return self._labels
+
+    @property
+    def global_centers(self):
         if not self.has_labels:
             self.calculate_labels()
         return self._centers
@@ -130,6 +148,7 @@ class Birch:
 
     def add_pandas_data_frame(self, data_frame):
         self._labels = None
+        self._global_labels = None
         indices = data_frame.index.values
         data_points = data_frame.values
         for index, data_point in itertools.izip(indices, data_points):
@@ -219,6 +238,10 @@ class BirchNode:
     @property
     def has_to_split(self):
         return len(self._clustering_features) > self.birch.branching_factor
+
+    @property
+    def is_full(self):
+        return len(self._clustering_features) >= self.birch.branching_factor
     
     @property
     def cf_sum(self):
@@ -290,11 +313,39 @@ class BirchNode:
         cf1.node = self
         cf2.node = self
 
+    #only use on merges
+    def merge_replace_cf(self, new_cf, cf1, cf2):
+        self._clustering_features.append(new_cf)
+        self._clustering_features.remove(cf1)
+        self._clustering_features.remove(cf2)
+        new_cf.node = self
+
     #TODO
-    def merging_refinement(self):
-        pass
+    def merging_refinement(self, splitted_cf0, splitted_cf1):
+        distances = {}
+        i = 0
+        cfs = self._clustering_features
+        for cf1 in cfs:
+            j = i + 1
+            for cf2 in cfs[j:]:
+                distances[(i, j)] = self.birch.cluster_distance(cf1.n_data, cf1.linear_sum, cf1.squared_norm, cf2.n_data, cf2.linear_sum, cf2.squared_norm)
+                j += 1
+            i += 1
+        seeds_indices = min(distances.iteritems(), key=operator.itemgetter(1))[0]
+        merger0 = cfs[seeds_indices[0]]
+        merger1 = cfs[seeds_indices[1]]
+        if merger0 is splitted_cf0 and merger1 is splitted_cf1 or merger0 is splitted_cf1 and merger1 is splitted_cf0:
+            return
+        new_node = BirchNode(self.birch, self.is_leaf)
+        new_cf = NonLeafClusteringFeature(self.birch, new_node)
+        mergers_cfs = merger0.child._clustering_features + merger1.child._clustering_features
+        for cf in mergers_cfs:
+            new_node.add_clustering_feature(cf)
+        self.merge_replace_cf(new_cf, merger0, merger1)
+
 
     def split(self):
+        last_split = True
         new_node0 = BirchNode(self.birch, self.is_leaf)
         new_node1 = BirchNode(self.birch, self.is_leaf)
         new_cf0 = NonLeafClusteringFeature(self.birch, new_node0)
@@ -314,8 +365,6 @@ class BirchNode:
         seed1 = cfs[seeds_indices[1]]
         new_node0.add_clustering_feature(seed0)
         new_node1.add_clustering_feature(seed1)
-
-
         cfs.remove(seed0)
         cfs.remove(seed1)
         new_nodes = [new_node0, new_node1]
@@ -323,8 +372,11 @@ class BirchNode:
             next_cf = cfs[0]
             dist0 = self.birch.cluster_distance(new_cf0.n_data, new_cf0.linear_sum, new_cf0.squared_norm, next_cf.n_data, next_cf.linear_sum, next_cf.squared_norm)
             dist1 = self.birch.cluster_distance(new_cf1.n_data, new_cf1.linear_sum, new_cf1.squared_norm, next_cf.n_data, next_cf.linear_sum, next_cf.squared_norm)
-            closest_node = new_nodes[np.argmin([dist0, dist1])]
-            closest_node.add_clustering_feature(next_cf)
+            closest_node, furthest_node = [new_nodes[i] for i in np.argsort([dist0, dist1])]
+            if closest_node.is_full:
+                furthest_node.add_clustering_feature(next_cf)
+            else:
+                closest_node.add_clustering_feature(next_cf)
             cfs.remove(next_cf)
 
         if self.is_root:
@@ -332,10 +384,16 @@ class BirchNode:
             new_root.add_clustering_feature(new_cf0)
             new_root.add_clustering_feature(new_cf1)
             self.birch.root = new_root
+            last_split_node = new_root
         else:
             self.node_parent.replace_cf(self.cf_parent, new_cf0, new_cf1)
             if self.node_parent.has_to_split:
+                last_split = False
                 self.node_parent.split()
+            else:
+                last_split_node = self.node_parent
+        if last_split:
+            last_split_node.merging_refinement(new_cf0, new_cf1)
 
 
 class ClusteringFeature:

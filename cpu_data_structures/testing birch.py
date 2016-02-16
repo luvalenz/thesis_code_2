@@ -19,28 +19,33 @@ X3= np.random.multivariate_normal(mean3, cov1, n)
 X4 = np.random.multivariate_normal(mean4, cov2, n)
 X5 = np.random.multivariate_normal(mean5, cov2, n)
 X = np.vstack((X1, X2, X3, X4, X5))
+order = np.arange(len(X))
+np.random.shuffle(order)
+X = X[order]
+print X
 # np.save('test_array', X)
 
 
 #X = np.load('test_array.npy')
-print(X.shape)
+#print(X.shape)
 df = pd.DataFrame(X)
 
 threshold = 3
 brc = Birch(threshold, 'd1', 'r', 2)
 brc.add_pandas_data_frame(df)
-X = X
+
+
 #brc.add_pandas_data_frame(df3)
 # brc.add_pandas_data_frame(df4)
 # brc.add_pandas_data_frame(df5)
-print(brc.labels)
+#print(brc.labels)
 
 import matplotlib.pyplot as plt
 labels = brc.labels[np.argsort(brc.labels[:,0]),1].astype(np.int32)
 unique_labels = brc.unique_labels
 colors = plt.cm.Spectral(np.linspace(0, 1, len(unique_labels)))
 centers = brc.centers
-print centers
+#print centers
 
 
 plt.plot(centers[:, 0], centers[:, 1], 'x')
